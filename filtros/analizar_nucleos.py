@@ -1,3 +1,5 @@
+import numpy as np
+from skimage.measure import regionprops
 def analizar_nucleos(labels_ws, sharpened_im):
     props = regionprops(labels_ws, intensity_image=sharpened_im)
 
