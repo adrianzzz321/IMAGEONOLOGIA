@@ -10,6 +10,8 @@ def cargar_imagen(ruta):
         im = np.mean(im, axis=2).astype(np.uint8)
     else:
         im = im.astype(np.uint8)
+    print("Shape:", im.shape)
+    print("Valor min:", im.min(), "max:", im.max(), "mean:", im.mean())
     return im
 
 # 🧠 1. Cargar la imagen desde la ruta

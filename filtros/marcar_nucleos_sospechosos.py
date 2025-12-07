@@ -4,7 +4,8 @@ import matplotlib.patches as patches
 # Dibuja un círculo amarillo alrededor de cada núcleo sospechoso usando su centro 
 # y tamaño para ayudarte a visualizarlos claramente en la imagen.
 
-def marcar_nucleos_sospechosos(im, nucleos_sospechosos):
+def marcar_nucleos_sospechosos(im, nucleos_sospechosos,
+                               radio_max=30):
     plt.figure(figsize=(6,6))
     plt.imshow(im, cmap="gray")
     ax = plt.gca()
@@ -13,9 +14,12 @@ def marcar_nucleos_sospechosos(im, nucleos_sospechosos):
         cy, cx = r.centroid     # centro (fila, columna)
         radius = r.equivalent_diameter / 2.0
 
-        circ = patches.Circle((cx, cy), radius, 
-                              edgecolor='yellow', 
-                              facecolor='none', 
+        # Limitar el radio para que no haya círculos gigantes
+        radius = min(radius, radio_max)
+
+        circ = patches.Circle((cx, cy), radius,
+                              edgecolor='yellow',
+                              facecolor='none',
                               linewidth=2)
         ax.add_patch(circ)
 

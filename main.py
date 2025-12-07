@@ -1,7 +1,7 @@
 from filtros import *
 import numpy as np
 
-im = cargar_imagen("Data\imagendecelula2.jpg")
+im = cargar_imagen("Data\imagendecelula1.jpg")
 im_norm = normalizar_robusto(im)
 im_corr = corregir_iluminacion(im_norm)
 im_denoise = denoise_imagen(im_corr)

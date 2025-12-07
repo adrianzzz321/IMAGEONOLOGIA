@@ -4,175 +4,172 @@ from skimage.morphology import opening, closing, disk, remove_small_objects,labe
 from skimage.segmentation import watershed
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 
-# Toma la imagen realzada, separa núcleos del fondo, limpia la máscara,
-#  calcula la distancia al borde para cada núcleo, usa esa información para
-#  crear semillas internas y aplica watershed para obtener cada núcleo bien 
-# separado y etiquetado. Devuelve la máscara binaria y la imagen con los núcleos 
-# numerados.
+# 🟪 EXPLICACIÓN SÚPER SIMPLE del segmento principal
+
+# Si el núcleo es muy oscuro, el puntaje sube.
+
+# Si tiene bordes raros, el puntaje sube.
+
+# Si su interior tiene manchitas o grumos (textura alta), el puntaje sube MUCHO.
+
+# Si la forma no es redonda, también sube.
+
+# Combina todo eso y elige los más extraños.
+
+#👉 Es básicamente un "detector de núcleos raros", usando varias señales sencillas.
+
+from skimage.filters import threshold_otsu
+from skimage.morphology import disk, opening, closing, remove_small_objects
+from scipy.ndimage import distance_transform_edt, gaussian_filter
+from skimage.segmentation import watershed
+from skimage.measure import label
+import numpy as np
 
 def segmentar_nucleos(im_realzada):
+    
+    # 1) Invertimos la imagen → núcleos quedan brillantes
+    inv = 1 - im_realzada
 
-    th = threshold_otsu(im_realzada)
-    mask = im_realzada > th
+    # 2) Umbral Otsu sobre la imagen invertida
+    th = threshold_otsu(inv)
+    mask = inv > th
 
+    # 3) Abrimos para eliminar manchas pequeñas
     mask = opening(mask, disk(1))
-    mask = closing(mask, disk(2))
-    mask = remove_small_objects(mask, min_size=70)
 
+    # 4) Quitamos ruido menor a 50 px
+    mask = remove_small_objects(mask, min_size=50)
+
+    # 5) Transformada de distancia en máscaras brillantes (núcleos invertidos)
     dist = distance_transform_edt(mask)
+    dist = gaussian_filter(dist, sigma=1)
 
-    dist_smooth = gaussian_filter(dist, sigma=1.0)
+    # 6) Cálculo de marcadores: usamos un percentil alto
+    marker_th = np.percentile(dist[mask], 75)
+    markers = label(dist > marker_th)
 
-    umbral_marcadores = np.percentile(dist_smooth[mask], 70)
-    markers = label(dist_smooth > umbral_marcadores)
-
-
-    labels_ws = watershed(-dist_smooth, markers, mask=mask)
+    # 7) Watershed para separar núcleos pegados
+    labels_ws = watershed(-dist, markers, mask=mask)
 
     return mask, labels_ws
 
 
-# 🧠 1. Umbralización con Otsu (separar fondo vs núcleos)
-# th = threshold_otsu(im_realzada)
-# mask = im_realzada > th
+# 1) Invertimos la imagen → núcleos quedan brillantes
+# inv = 1 - im_realzada
 
 
-# threshold_otsu calcula un umbral automático que separa:
+# Muchos algoritmos funcionan mejor cuando los objetos de interés son brillantes.
 
-# Intensidades bajas → fondo
+# Los núcleos en H&E suelen ser oscuros, por eso los invertimos.
 
-# Intensidades altas → núcleos (o regiones de interés)
+# Si antes era oscuro (0.2), ahora pasa a 0.8 → más fácil detectarlo.
 
-# mask es una imagen binaria:
+# Esto prepara la imagen para umbralización y watershed.
 
-# True (1) → píxel considerado núcleo
+# 2) Umbral Otsu sobre la imagen invertida
+# th = threshold_otsu(inv)
+# mask = inv > th
 
-# False (0) → fondo
 
-# Es el primer corte “grueso” para saber dónde hay núcleos.
+# Otsu encuentra un umbral automático separando dos grupos de intensidades:
 
-# 🧹 2. Limpieza de la máscara con morfología
+# píxeles brillantes → núcleos
+
+# píxeles oscuros → fondo
+
+# Aquí trabajamos sobre la imagen invertida, así que:
+
+# inv > th produce una máscara donde los núcleos quedan True.
+
+# 3) Apertura morfológica
 # mask = opening(mask, disk(1))
-# mask = closing(mask, disk(2))
-# mask = remove_small_objects(mask, min_size=70)
 
-# a) Opening (apertura)
 
-# opening(mask, disk(1))
+# La “apertura” (opening) hace dos cosas:
 
-# Operación: erosión seguida de dilatación con un elemento estructurante disco de radio 1.
+# Erosiona ligeramente → elimina puntos sueltos y ruido fino
 
-# Sirve para:
-
-# Eliminar pequeños puntos de ruido.
-
-# Suavizar bordes muy “dentados”.
-
-# b) Closing (cierre)
-
-# closing(mask, disk(2))
-
-# Operación: dilatación seguida de erosión.
+# Diluye después → restaura el tamaño
 
 # Sirve para:
 
-# Cerrar pequeños huecos dentro de los núcleos.
+# Limpiar imperfecciones pequeñas
 
-# Unir partes muy cercanas de un mismo objeto.
+# Suavizar bordes
 
-# c) Eliminar objetos pequeños
+# El disk(1) es un elemento estructurante muy pequeño → cambios suaves.
 
-# mask = remove_small_objects(mask, min_size=70)
+# 4) Eliminar objetos pequeños (ruido)
+# mask = remove_small_objects(mask, min_size=50)
 
-# Elimina componentes conectados con menos de 70 píxeles.
 
-# Esto filtra:
+# Descarta todo lo que no mida mínimo 50 píxeles.
 
-# Ruido residual.
+# Esto elimina:
 
-# Punteo que no corresponde a núcleos reales.
+# Granos de ruido
 
-# Después de esto, mask es una máscara binaria mucho más limpia y coherente.
+# Artefactos microscópicos
 
-# 📏 3. Transformada de distancia
+# Trozos de células rotas muy pequeños
+
+# 5) Transformada de distancia
 # dist = distance_transform_edt(mask)
+# dist = gaussian_filter(dist, sigma=1)
+
+# ¿Qué es la transformada de distancia?
+
+# Para cada píxel dentro de un objeto (núcleo), mide:
+
+# “¿cuán lejos está del borde más cercano?”
+
+# Esto logra que:
+
+# El centro del núcleo tenga un valor alto
+
+# El borde cercano a 0
+
+# Es perfecto para separar núcleos pegados.
+
+# Luego se suaviza (gaussian_filter) para evitar que el watershed genere bordes irregulares.
+
+# 6) Marcadores basados en percentil 75 del distance transform
+# marker_th = np.percentile(dist[mask], 75)
+# markers = label(dist > marker_th)
 
 
-# La distance transform (edt) calcula, para cada píxel dentro de la máscara:
+# Aquí se buscan los “máximos locales” de la transformada de distancia:
 
-# La distancia al píxel de fondo más cercano.
+# Si tomas el percentil 75, te quedas con los valores más altos → los centros de los núcleos.
 
-# Resultado:
+# dist > marker_th marca las zonas que pertenecen a los centros.
 
-# En el centro de cada núcleo → valores altos (lejos del borde).
+# label() asigna números consecutivos a cada marcador.
 
-# Cerca de los bordes → valores bajos.
+# Estos marcadores guían el watershed.
 
-# Esto convierte la máscara en una especie de “montaña” por cada núcleo.
+# 7) Aplicar watershed para separar núcleos pegados
+# labels_ws = watershed(-dist, markers, mask=mask)
 
-# 🌫️ 4. Suavizado de la distancia
-# dist_smooth = gaussian_filter(dist, sigma=1.0)
+# Por qué -dist ?
 
+# Porque watershed segmenta cuencas, no montañas.
+# Al invertir la transformada de distancia (-dist):
 
-# Aplica un filtro gaussiano para suavizar la transformada de distancia.
+# Las zonas altas (centros) se vuelven “valles”.
 
-# Reduce irregularidades y picos raros.
-
-# Hace que cada núcleo se parezca más a una colina suave.
-
-# Esto ayuda muchísimo para que el watershed funcione bien y no se fragmente en exceso.
-
-# 🎯 5. Cálculo de marcadores internos
-# umbral_marcadores = np.percentile(dist_smooth[mask], 70)
-# markers = label(dist_smooth > umbral_marcadores)
-
-
-# Aquí se crean los “semillas” para watershed:
-
-# dist_smooth[mask] → toma solo los valores de distancia dentro de los núcleos.
-
-# np.percentile(..., 70) → escoge un valor tal que:
-
-# El 70% de los píxeles tienen distancia menor o igual.
-
-# El 30% restante (los más centrales) son los puntos más lejos del borde.
-
-# dist_smooth > umbral_marcadores → genera una máscara que marca las zonas más centrales de los núcleos.
-
-# label(...) → etiqueta cada región conectada como un marcador distinto:
-
-# 1, 2, 3, … → semillas para cada núcleo.
-
-# Estos marcadores son como “banderitas” puestas dentro de cada núcleo, desde donde comenzará la expansión del watershed.
-
-# 🌊 6. Segmentación final con watershed
-# labels_ws = watershed(-dist_smooth, markers, mask=mask)
-
-
-# Se aplica watershed sobre -dist_smooth:
-
-# Como dist_smooth tiene valores altos en el centro de los núcleos, al usar -dist_smooth se convierten en valles.
-
-# Watershed “inunda” la imagen desde los marcadores y separa regiones vecinas.
-
-# markers define los puntos de inicio de cada región.
-
-# mask=mask restringe el watershed solo al interior de la máscara de núcleos (no se expande al fondo).
+# Watershed crece desde esos centros hasta llenar los objetos.
 
 # Resultado:
 
-# labels_ws es una imagen de etiquetas:
+# Cada objeto (núcleo) recibe un ID distinto.
 
-# 0 → fondo
+# Núcleos pegados se separan correctamente.
 
-# 1, 2, 3, … → cada núcleo individualmente segmentado
-
-# 🎁 7. Lo que devuelve la función
+# 8) Devolver la máscara y las etiquetas
 # return mask, labels_ws
 
 
-# mask → máscara binaria de núcleos (fondo vs núcleos).
+# mask: binaria (núcleo vs fondo)
 
-# labels_ws → versión segmentada donde cada núcleo tiene una etiqueta distinta.
-
-# Perfecto para usar con regionprops y análisis posterior.
+# labels_ws: matriz con números enteros, cada uno representando un núcleo distinto.
